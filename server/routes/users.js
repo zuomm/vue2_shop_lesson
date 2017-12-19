@@ -1,0 +1,471 @@
+var express = require('express');
+var router = express.Router();
+var User = require('./../models/user');
+require('./../utils/format');
+
+/* 登录接口 */
+router.post('/login', function(req, res, next) {
+  // res.render('index', { title: '商城后台' });
+
+  /**
+   *   /users/login 接口传过来的参数可以通过 req.body.userName来接收
+   */
+  var param = {
+    userName : req.body.userName,
+    userPwd : req.body.userPwd
+  };
+  /**
+   *   查询这个用户(param为查询的条件)，对比这个用户存不存在,
+   *   还需要一个验证码的，防止恶意登录
+   */
+  User.findOne(param , function(err,doc){
+    if(err){
+      res.json({
+        status:"1",
+        msg:err.message
+      })
+    }else{
+      if(doc){
+        //用户存在时，返回头里面,设置 cookie
+
+        res.cookie("userId",doc.userId,{
+          path:'/' ,  // cookie的有效路径path，设置为当前路径/ ,8080端口下才有效
+          maxAge:1000*60*60  // 有效时长：1小时
+        });
+        res.cookie("userName",doc.userName,{
+          path:'/' ,  // cookie的有效路径path，设置为当前路径/
+          maxAge:1000*60*60  // 有效时长：1小时
+        });
+
+        res.json({
+          status:"0",
+          msg:'',
+          result:{
+            userName : doc.userName //返回用户名
+          }
+        })
+      }
+    }
+  })
+});
+
+// 检查登录状态cookies
+router.get("/checkLogin", function (req,res,next) {
+  if(req.cookies.userId){
+      res.json({
+          status:'0',
+          msg:'',
+          result:req.cookies.userName || ''
+      });
+  }else{
+      res.json({
+          status:'1',
+          // msg:'未登录',
+          result:''
+      });
+  }
+});
+
+//登出接口
+router.post('/logout', function(req, res, next) {
+  res.cookie("userId",'',{
+    path:'/' ,  
+    maxAge:-1 //cookie失效
+  });
+  res.json({
+    status:"0",
+    msg:'',
+    result:''
+  })
+});
+
+//查询购物车列表
+router.get('/cartList', function(req, res, next) {
+  var userId = req.cookies.userId;
+  User.findOne({userId:userId} , function(err,doc){
+    if(err){
+      res.json({
+        status:"1",
+        msg:err.message,
+        result:''
+      })
+    }else{
+      if(doc){
+        res.json({
+          status:"0",
+          msg:'',
+          result:doc.cartList 
+        })
+      }
+    }
+  })
+})
+
+//购物车删除
+/**
+ * update()更新数据库
+ * $pull抽出：从大物件里面抽取出所需要的
+ */
+router.post('/cartDel', function(req, res, next) {
+  var userId = req.cookies.userId, 
+      productId = req.body.productId;//删除的那个商品传过来的productId
+    User.update({userId:userId},{
+      $pull:{
+        'cartList':{
+          'productId':productId
+        }
+      }
+    },function(err,doc){
+      if(err){
+        res.json({
+          status:"1",
+          msg:err.message,
+          result:''
+        })
+      }else{
+        if(doc){
+          res.json({
+            status:"0",
+            msg:'',
+            result:'suc' //只返回信息
+          })
+        }
+      }
+    })
+});
+
+//修改商品数量
+router.post('/cartEdit', function(req, res, next) {
+  var userId = req.cookies.userId, 
+
+      //把页面上的数据同步到数据库
+      productId = req.body.productId,
+      productNum = req.body.productNum,
+      checked = req.body.checked;
+
+  User.update({'userId':userId,'cartList.productId':productId},{
+    'cartList.$.productNum':productNum,
+    'cartList.$.checked':checked,
+  },function(err,doc){
+    if(err){
+      res.json({
+        status:"1",
+        msg:err.message,
+        result:''
+      })
+    }else{
+      if(doc){
+        res.json({
+          status:"0",
+          msg:'',
+          result:'suc' //只返回信息
+        })
+      }
+    }
+  })
+});
+
+//全选
+router.post("/editCheckAll", function (req,res,next) {
+  var userId = req.cookies.userId,
+      checkAll = req.body.checkAll?'1':'0';
+  User.findOne({userId:userId}, function (err,user) {
+    //user为查询的数据库json对象
+      if(err){
+          res.json({
+              status:'1',
+              msg:err.message,
+              result:''
+          });
+      }else{
+          if(user){
+              user.cartList.forEach((item)=>{
+                  item.checked = checkAll;
+              })
+              user.save(function (err1,doc) {
+                  if(err1){
+                      res.json({
+                          status:'1',
+                          msg:err1,message,
+                          result:''
+                      });
+                  }else{
+                      res.json({
+                          status:'0',
+                          msg:'',
+                          result:'suc'
+                      });
+                  }
+              })
+          }
+      }
+  });
+});
+
+//查询用户地址接口
+router.get("/addressList", function (req,res,next) {
+  var userId = req.cookies.userId;
+  User.findOne({userId:userId}, function (err,doc) {
+      if(err){
+          res.json({
+              status:'1',
+              msg:err.message,
+              result:''
+          });
+      }else{
+          res.json({
+              status:'0',
+              msg:'',
+              result:doc.addressList
+          });
+      }
+  })
+});
+
+//设置默认地址接口
+router.post("/setDefault", function (req,res,next) {
+  var userId = req.cookies.userId,
+      addressId = req.body.addressId;
+  if(!addressId){
+      res.json({
+          status:'1003',
+          msg:'addressId is null',
+          result:''
+      });
+  }else{
+      User.findOne({userId:userId}, function (err,doc) {
+          if(err){
+              res.json({
+                  status:'1',
+                  msg:err.message,
+                  result:''
+              });
+          }else{
+              var addressList = doc.addressList;
+              addressList.forEach((item)=>{
+                  if(item.addressId ==addressId){
+                      item.isDefault = true;
+                  }else{
+                      item.isDefault = false;
+                  }
+              });
+
+              doc.save(function (err1,doc1) {
+                  if(err){
+                      res.json({
+                          status:'1',
+                          msg:err.message,
+                          result:''
+                      });
+                  }else{
+                      res.json({
+                          status:'0',
+                          msg:'',
+                          result:''
+                      });
+                  }
+              })
+          }
+      });
+  }
+});
+
+//删除地址接口
+router.post("/delAddress", function (req,res,next) {
+  var userId = req.cookies.userId,addressId = req.body.addressId;
+  User.findOne({userId:userId},function(err,doc){
+    if(err){
+      res.json({
+        status:'1',
+        msg:err.message,
+        result:''
+      })
+    }else{
+      if(doc.addressList.length > 1){
+        //地址至少留一个
+        User.update({
+            userId:userId
+        },{
+            $pull:{
+                'addressList':{
+                    'addressId':addressId
+                }
+            }
+        }, function (err,doc) {
+            if(err){
+                res.json({
+                    status:'1',
+                    msg:err.message,
+                    result:''
+                });
+            }else{
+                res.json({
+                    status:'0',
+                    msg:'',
+                    result:''
+                });
+            }
+        });
+      }else{
+        res.json({
+          status:'1',
+          msg:'至少保留一条收货地址！',
+          result:''
+        });
+      }
+    }
+  })
+
+
+    
+});
+
+// 创建订单接口
+router.post("/payMent",function(req,res,next) {
+  var userId = req.cookies.userId,
+      addressId = req.body.addressId,
+      orderTotal = req.body.orderTotal;
+  User.findOne({userId:userId},function(err,doc){
+    if(err){
+      res.json({
+        status:"1",
+        msg:err.message,
+        result:''
+      });
+    }else{
+      var address = '',goodsList = [];
+      //获取当前用户的地址信息
+      doc.addressList.forEach((item)=>{
+        if(addressId == item.addressId){
+          address = item;//item是一个对象
+        }
+      });
+      //获取用户购物车的购买商品
+      doc.cartList.forEach((item)=>{
+        if(item.checked=='1'){
+          goodsList.push(item);
+        }
+      });
+
+      //生成订单号
+      var platform = '622'; //平台号
+      var r1 = Math.floor(Math.random()*10);
+      var r2 = Math.floor(Math.random()*10);
+
+      var sysDate = new Date().Format('yyyyMMddhhmmss');
+      var createDate = new Date().Format('yyyy-MM-dd hh:mm:ss');
+      //Format函数需要引入,node的data()没有format函数
+    
+      var orderId = platform+r1+sysDate+r2;
+      var order = {
+        orderId:orderId,
+        orderTotal:orderTotal,
+        addressInfo:address,
+        goodsList:goodsList,
+        orderStatus:'1',
+        createDate:createDate
+      }
+
+      doc.orderList.push(order); //存入订单信息
+      //保存到数据库
+      doc.save(function(err1,doc1){
+        if(err1){
+          res.json({
+            status:"1",
+            msg:err.message,
+            result:''
+          });
+        }else{
+          res.json({
+            status:"0",
+            msg:'',
+            result:{
+              orderId:order.orderId,
+              orderTotal:order.orderTotal
+            }
+          });
+        }
+      })
+    }
+  })
+})
+
+//根据订单Id查询订单信息
+router.get("/orderDetail", function (req,res,next) {
+  var userId = req.cookies.userId,orderId = req.param("orderId");
+  User.findOne({userId:userId}, function (err,userInfo) {
+    if(err){
+      res.json({
+        status:'1',
+        msg:err.message,
+        result:''
+      });
+    }else{
+      var orderList = userInfo.orderList;
+      if(orderList.length>0){
+        var orderTotal = 0;
+        orderList.forEach((item)=>{
+          if(item.orderId == orderId){
+            orderTotal = item.orderTotal;
+          }
+        });
+        if(orderTotal>0){
+          res.json({
+            status:'0',
+            msg:'',
+            result:{
+              orderId:orderId,
+              orderTotal:orderTotal
+            }
+          })
+        }else{
+          res.json({
+            status:'120002',
+            msg:'无此订单',
+            result:''
+          });
+        }
+      }else{
+        res.json({
+          status:'120001',
+          msg:'当前用户未创建订单',
+          result:''
+        });
+      }
+    }
+  })
+});
+
+// 获取购车商品数量
+router.get("/getCartCount", function (req,res,next) {
+  if(req.cookies && req.cookies.userId){
+    console.log("userId:"+req.cookies.userId);
+    var userId = req.cookies.userId;
+    User.findOne({"userId":userId}, function (err,doc) {
+      if(err){
+        res.json({
+          status:"0",
+          msg:err.message
+        });
+      }else{
+        let cartList = doc.cartList;
+        let cartCount = 0;
+        cartList.map(function(item){
+          cartCount += parseFloat(item.productNum);
+        });
+        res.json({
+          status:"0",
+          msg:"",
+          result:cartCount
+        });
+      }
+    });
+  }else{
+    res.json({
+      status:"0",
+      msg:"当前用户不存在"
+    });
+  }
+});
+
+module.exports = router;
